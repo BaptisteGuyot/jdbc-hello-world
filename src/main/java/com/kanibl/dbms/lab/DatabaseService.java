@@ -1,17 +1,24 @@
 package com.kanibl.dbms.lab;
 
+import com.google.gson.GsonBuilder;
+import redis.clients.jedis.Jedis;
+import redis.clients.jedis.JedisPool;
+import redis.clients.jedis.JedisPoolConfig;
+
 import java.sql.*;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
+
+import com.google.gson.Gson;
+import redis.clients.jedis.params.SetParams;
 
 public class DatabaseService {
 
     private String jdbcString;
     private Connection connection;
+    private JedisPool pool;
 
     public DatabaseService(String jdbcString) throws Exception {
+        pool = new JedisPool(new JedisPoolConfig(), "redis-12402.c9.us-east-1-2.ec2.cloud.redislabs.com", 12402,200, "nantes");
         this.jdbcString = jdbcString;
         connectoToDB();
     }
@@ -39,14 +46,21 @@ public class DatabaseService {
     }
 
     public List<Map<String, String>>  getUserAllAsMap() throws SQLException {
-
+        List<Map<String,String>> data = null;
+        long start = System.currentTimeMillis();
+        Gson gson = new Gson();
+        String sentence = "";
+        try(Jedis jedis = pool.getResource()){
+            data = gson.fromJson(jedis.get("bguyotGetUserAllAsMap"), List.class);
+            if(data == null){
+        sentence = " - No cache";
         String query = "SELECT * FROM users";
 
         Statement stmt = connection.createStatement();
         ResultSet rs = stmt.executeQuery(query);
         ResultSetMetaData rsmd = rs.getMetaData();
         List<String> columns = new ArrayList<String>(rsmd.getColumnCount());
-        List<Map<String,String>> data = new ArrayList<Map<String,String>>();
+        data = new ArrayList<Map<String,String>>();
 
         for(int i = 1; i <= rsmd.getColumnCount(); i++){
             columns.add(rsmd.getColumnName(i));
@@ -56,10 +70,27 @@ public class DatabaseService {
         }
         rs.close();
         stmt.close();
+        jedis.set("bguyotGetUserAllAsMap",gson.toJson(data), SetParams.setParams().ex(120));
+            }else{
+                sentence=" - From cache";
+            }
+        }catch(Exception e){
+
+        }
+        long end = System.currentTimeMillis();
+        System.out.println("Call GetUserAllAsMap : "+ (end-start) +"ms"+sentence );
         return data;
     }
 
     public Map<String, String> getUserById(int id) throws SQLException {
+        Map<String,String> data = null;
+        long start = System.currentTimeMillis();
+        Gson gson = new Gson();
+        String sentence = "";
+        try(Jedis jedis = pool.getResource()){
+            data = gson.fromJson(jedis.get("bguyotGetUserById"+id), Map.class);
+            if(data == null){
+        sentence = " - No cache";
 
         String query = "SELECT * FROM users WHERE id = " + id;
 
@@ -67,7 +98,7 @@ public class DatabaseService {
         ResultSet rs = stmt.executeQuery(query);
         ResultSetMetaData rsmd = rs.getMetaData();
         List<String> columns = new ArrayList<String>(rsmd.getColumnCount());
-        Map<String,String> data = new HashMap<String, String>();
+        data = new HashMap<String, String>();
 
         for(int i = 1; i <= rsmd.getColumnCount(); i++){
             columns.add(rsmd.getColumnName(i));
@@ -77,6 +108,15 @@ public class DatabaseService {
         }
         rs.close();
         stmt.close();
+        jedis.set("bguyotGetUserById"+id,gson.toJson(data), SetParams.setParams().ex(120));
+            }else{
+                sentence = " - From cache";
+            }
+        }catch(Exception e){
+
+        }
+        long end = System.currentTimeMillis();
+        System.out.println("Call getUserById : "+ (end-start) +"ms" +sentence);
         return data;
     }
 
@@ -92,6 +132,11 @@ public class DatabaseService {
         if (connection != null) {
             connection.close();
         }
+        try (Jedis jedis = pool.getResource()) {
+            Set<String> keys = jedis.keys("bguyot*");
+            for(String key : keys) {
+                jedis.del(key);
+            }
+        }
     }
-
 }
